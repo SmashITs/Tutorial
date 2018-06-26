@@ -1,0 +1,132 @@
+Hooking JS:
+
+1. Hooking functions with prototype:
+
+1.1.0. XMLHttpRequest(Log and relay):
+------------------------------------------------------------------------------------
+// #user,password => basic HTTP Authentication
+// #https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/open
+XMLHttpRequest.prototype.open = (function(open){
+	return function(method,url,async,user,password){
+		// Request parameters
+		console.log(method);
+		console.log(url);
+		console.log(async);
+		console.log(user);
+		console.log(password);
+		// XHR reponse
+		this.addEventListener('load', function(){
+			console.log(this.readyState);
+			console.log(this.status);
+			console.log(this.responseText);
+			console.log(this.getResponseHeader('Content-Type'));
+		});
+		open.apply(this,arguments);
+	};
+})(XMLHttpRequest.prototype.open);
+
+XMLHttpRequest.prototype.send = (function(send){
+	return function(p){
+		console.log(p);
+		send.apply(this,arguments);
+	};
+})(XMLHttpRequest.prototype.send);
+------------------------------------------------------------------------------------
+1.1.1. Example of rewriting url:
+XMLHttpRequest.prototype.open = (function(open){
+	return function(method,url,async,user,password){
+		// Change parameters
+		url = "idontknow.php";
+		user = "foo";
+		password = "bar";
+		//arguments[1] += '_hooked'; // -> or change it by manipulate arguments[].
+		// XHR reponse
+		this.addEventListener('load', function(){
+			console.log(this.readyState);
+			console.log(this.status);
+			console.log(this.responseText);
+			console.log(this.getResponseHeader('Content-Type'));
+		});
+		open.apply(this,arguments);
+	};
+})(XMLHttpRequest.prototype.open);
+------------------------------------------------------------------------------------
+1.1.2. Inject Payload Script (ex. with Python):
+payload = '''
+function exploit(p){
+        console.log("Exploit started.")
+        //do something here:
+        return false;
+    }
+    XMLHttpRequest.prototype.open = (function(open){
+        return function(method,url,async,user,password){
+            //Change parameters with result of exploit()
+            method = exploit(method);
+            //XHR reponse
+            this.addEventListener('load', function(){
+                if(this.readyState == 4){ //Done
+                    console.log("Done sending payload.")
+                    console.log(this.status);
+                    console.log(this.responseText);
+                    console.log(this.getResponseHeader('Content-Type'));
+                }
+            });
+            open.apply(this,arguments);
+        };
+    })(XMLHttpRequest.prototype.open);
+
+'''
+inject = '''
+var script = document.createElement('script');
+script.text = '"+payload+"';
+document.head.insertBefore(script, document.head.firstElementChild);
+'''
+
+#Injecting JS with payload
+executeJS(inject)
+------------------------------------------------------------------------------------
+1.2.0. alert() => get message and caller.
+window.alert =(function(alert){
+	return function(p){
+	console.log(p);
+	console.log(arguments.callee.caller.name);
+	alert.apply(this,arguments);
+	};
+})(window.alert);
+*****************************************************************************************************************
+2. Hooking Objects with Setter/Getter:
+The whole hooking process depends on your browser because your Object property has to be configurable.
+I use here => Firefox/57.0.
+
+2.1.0. Check property:
+
+a)
+Object.getOwnPropertyNames(window.location); =>
+Array [ "href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash", "assign", … ]
+
+b)
+Object.getOwnPropertyDescriptor(window.location,"protocol").configurable; =>
+false
+
+=> You can't Hook this with __lookupSetter__ / __lookupGetter__ on Firefox/57.0.
+
+Test here: https://domstorm.skepticfx.com/modules/?id=53990cb1fd987e64ab000003
+
+2.1.1. Hook document.cookie 
+var cs = document.__lookupSetter__('cookie');
+var cg = document.__lookupGetter__('cookie');
+Object.defineProperty(document, "cookie",{
+	get: function(){
+		alert("document.cookie was called.") // alert if cookie is called.
+		return cg.apply(this, arguments);
+	},
+	set: function(val){
+	arguments[0] += '_hooked'; // everytime a cookie is set, '_hooked' is added to it.
+	return cs.apply(this, arguments);
+	}
+});
+
+Test:
+document.cookie = "foo";
+Source: https://domstorm.skepticfx.com/modules/?id=57d7d99cf3bb8019d0b7f1fe
+*****************************************************************************************************************
